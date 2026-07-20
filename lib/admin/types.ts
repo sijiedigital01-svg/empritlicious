@@ -1,3 +1,18 @@
+export interface Product {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  quote: string | null;
+  price: number;
+  category: string | null;
+  image_url: string | null;
+  stock: number;
+  is_favorite: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
 export type OrderStatus =
   | 'menunggu_konfirmasi_ongkir'
   | 'diproses'

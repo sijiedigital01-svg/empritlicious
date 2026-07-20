@@ -1,24 +1,73 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import StatusBadge from './StatusBadge';
 import { fmtRupiah } from '@/lib/admin/format';
 import { orderStatusOptions } from '@/lib/admin/config/orders.config';
-import { updateShippingCost, updateOrderStatus } from '@/app/admin/(protected)/orders/[id]/actions';
+import {
+  updateShippingCost,
+  updateOrderStatus,
+  updatePaymentProofUrl,
+} from '@/app/admin/(protected)/orders/[id]/actions';
+import { createClient } from '@/lib/supabase/client';
 import type { Order, OrderStatus } from '@/lib/admin/types';
 
+const MAX_PROOF_SIZE = 5 * 1024 * 1024; // 5MB
+
 export default function OrderDetailClient({ order }: { order: Order }) {
+  const router = useRouter();
   const [ongkirInput, setOngkirInput] = useState('');
   const [statusValue, setStatusValue] = useState<OrderStatus>(order.status);
   const [toast, setToast] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isUploadingProof, setIsUploadingProof] = useState(false);
 
   const needsOngkir = order.status === 'menunggu_konfirmasi_ongkir';
 
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  }
+
+  async function handleProofFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      showToast('File harus berupa gambar atau PDF');
+      return;
+    }
+    if (file.size > MAX_PROOF_SIZE) {
+      showToast('Ukuran file maksimal 5MB');
+      return;
+    }
+
+    setIsUploadingProof(true);
+    try {
+      const supabase = createClient();
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('payment-proofs')
+        .upload(fileName, file);
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { data: publicUrlData } = supabase.storage
+        .from('payment-proofs')
+        .getPublicUrl(fileName);
+
+      const result = await updatePaymentProofUrl(order.id, publicUrlData.publicUrl);
+      showToast(result.message);
+      if (result.success) router.refresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal upload bukti pembayaran');
+    } finally {
+      setIsUploadingProof(false);
+    }
   }
 
   function handleSaveOngkir() {
@@ -144,7 +193,7 @@ export default function OrderDetailClient({ order }: { order: Order }) {
                   />
                 </a>
                 <div className="flex items-center justify-between px-3 py-2 text-xs text-[var(--ink-soft)]">
-                  <span>Diupload customer</span>
+                  <span>Bukti pembayaran</span>
                   <a
                     href={order.payment_proof_url}
                     target="_blank"
@@ -156,13 +205,31 @@ export default function OrderDetailClient({ order }: { order: Order }) {
                 </div>
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-[var(--border)] bg-[#FBFAF6] p-4 text-center text-xs text-[var(--ink-faint)]">
-                Belum ada bukti pembayaran diupload
+              <div className="mb-3 rounded-lg border border-dashed border-[var(--border)] bg-[#FBFAF6] p-4 text-center text-xs text-[var(--ink-faint)]">
+                Belum ada bukti pembayaran
                 <div className="mt-1.5 inline-block rounded-full bg-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--ink-soft)]">
                   Opsional — konfirmasi manual via WA
                 </div>
               </div>
             )}
+
+            <div className="mt-3">
+              <label className="mb-1.5 block text-xs font-medium text-[var(--ink-soft)]">
+                {order.payment_proof_url
+                  ? 'Ganti bukti pembayaran (mis. customer kirim via WA)'
+                  : 'Upload bukti pembayaran manual (mis. customer kirim via WA)'}
+              </label>
+              <input
+                type="file"
+                accept="image/*,.pdf"
+                onChange={handleProofFileChange}
+                disabled={isUploadingProof}
+                className="w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[var(--accent-bg)] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[var(--accent-dark)] disabled:opacity-60"
+              />
+              {isUploadingProof && (
+                <p className="mt-1.5 text-xs text-[var(--ink-soft)]">Mengupload...</p>
+              )}
+            </div>
           </div>
         </div>
 

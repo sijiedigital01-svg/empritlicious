@@ -34,18 +34,48 @@ export async function updateShippingCost(
 
   const total = (order.subtotal as number) + shippingCost;
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('orders')
     .update({ shipping_cost: shippingCost, total, status: 'diproses' as OrderStatus })
-    .eq('id', orderId);
+    .eq('id', orderId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     return { success: false, message: 'Gagal menyimpan ongkir: ' + error.message };
+  }
+  if (!updated) {
+    return { success: false, message: 'Gagal menyimpan ongkir: tidak diizinkan (cek RLS policy tabel orders)' };
   }
 
   revalidatePath(`/admin/orders/${orderId}`);
   revalidatePath('/admin/orders');
   return { success: true, message: 'Ongkir disimpan, status jadi "Diproses"' };
+}
+
+export async function updatePaymentProofUrl(orderId: string, url: string): Promise<ActionResult> {
+  const supabase = await createClient();
+
+  const { data: updated, error } = await supabase
+    .from('orders')
+    .update({ payment_proof_url: url })
+    .eq('id', orderId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    return { success: false, message: 'Gagal menyimpan bukti pembayaran: ' + error.message };
+  }
+  if (!updated) {
+    return {
+      success: false,
+      message: 'Gagal menyimpan bukti pembayaran: tidak diizinkan (cek RLS policy tabel orders)',
+    };
+  }
+
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath('/admin/orders');
+  return { success: true, message: 'Bukti pembayaran disimpan' };
 }
 
 export async function updateOrderStatus(
@@ -54,10 +84,18 @@ export async function updateOrderStatus(
 ): Promise<ActionResult> {
   const supabase = await createClient();
 
-  const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
+  const { data: updated, error } = await supabase
+    .from('orders')
+    .update({ status })
+    .eq('id', orderId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     return { success: false, message: 'Gagal update status: ' + error.message };
+  }
+  if (!updated) {
+    return { success: false, message: 'Gagal update status: tidak diizinkan (cek RLS policy tabel orders)' };
   }
 
   revalidatePath(`/admin/orders/${orderId}`);
